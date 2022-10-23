@@ -164,6 +164,6 @@ class FewShotSampler(object):
         selected_ids = np.array(selected_ids)
         self.rng.shuffle(selected_ids)
         selected_ids = selected_ids.tolist()    
-        logger.info("Selected examples {}".format(selected_ids))
+        #logger.info("Selected examples {}".format(selected_ids))
         return selected_ids
     

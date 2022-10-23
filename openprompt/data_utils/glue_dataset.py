@@ -23,7 +23,7 @@ from openprompt.utils.logging import logger
 from datasets import load_from_disk
 import os
 
-HUGGING_FACE_SCRIPTS = 'super_glue' # if you can not connect huggingface in our machine, you can download the scripts manually and change this line.
+HUGGING_FACE_SCRIPTS = 'glue' # if you can not connect huggingface in our machine, you can download the scripts manually and change this line.
 class SuperglueMultiRCProcessor(DataProcessor):
     def __init__(self):
         super().__init__()
@@ -117,7 +117,7 @@ class SuperglueCOPAProcessor(DataProcessor):
         guid = "{}".format(example['idx'])
         return InputExample(guid = guid, text_a = premise, meta=meta, label=label)
 
-class SuperglueRTEProcessor(DataProcessor):
+class GlueRTEProcessor(DataProcessor):
     def __init__(self):
         super().__init__()
         self.labels = ["Entailment", "Not Entailment"]
@@ -128,7 +128,7 @@ class SuperglueRTEProcessor(DataProcessor):
         try:
             dataset = load_dataset(path=HUGGING_FACE_SCRIPTS, name='rte', cache_dir=data_dir, split=split)
         except:
-            dataset = load_from_disk(f"{data_dir}/super_glue.rte")[split]
+            dataset = load_from_disk(f"{data_dir}/glue.rte")[split]
         #print(dataset[0])
         return list(map(self.transform, dataset))
 
@@ -231,7 +231,7 @@ PROCESSORS = {
     "super_glue.boolq": SuperglueBoolQProcessor,
     "super_glue.cb": SuperglueCBProcessor,
     "super_glue.copa": SuperglueCOPAProcessor,
-    "super_glue.rte": SuperglueRTEProcessor,
+    "glue.rte": SuperglueRTEProcessor,
     "super_glue.wic": SuperglueWiCProcessor,
     "super_glue.wsc": SuperglueWSCProcessor,
     "super_glue.record": SuperglueRecordProcessor, 

@@ -326,6 +326,28 @@ class SST2Processor(DataProcessor):
                 examples.append(example)
         return examples
 
+
+class YelpProcessor(myProcessor):
+    dataset_project = {"train": "train",
+                        "dev": None,
+                        "test": "test"
+                        }
+    def __init__(self):
+        super().__init__()
+        self.labels = ["1", "2"]
+
+    def get_examples(self, data_dir, split):
+        path = os.path.join(data_dir, "{}.csv".format(self.dataset_project[split]))
+        df = pd.read_csv(path, header=None)
+        examples = []
+        for idx, (label, text) in enumerate(zip(df[0], df[1])):
+            text_a = text
+            label = self.get_label_id(str(label))
+            example = InputExample(
+                    guid=str(idx), text_a=text_a, text_b="", label=label)
+            examples.append(example)
+        return examples
+
 PROCESSORS = {
     "agnews": AgnewsProcessor,
     "dbpedia": DBpediaProcessor,
@@ -334,4 +356,5 @@ PROCESSORS = {
     "sst-2": SST2Processor,
     "mnli": MnliProcessor,
     "yahoo": YahooProcessor,
+    "yelp": YelpProcessor,
 }

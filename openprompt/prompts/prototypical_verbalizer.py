@@ -59,7 +59,6 @@ class ProtoVerbalizer(Verbalizer):
         self.trained = False
         
         self.hidden_dims = model.config.hidden_size
-           
         self.head = torch.nn.Linear(self.hidden_dims, self.mid_dim, bias=False)
 
         if label_words is not None: # use label words as an initialization
@@ -67,16 +66,20 @@ class ProtoVerbalizer(Verbalizer):
         w = torch.empty((self.num_classes, self.mid_dim))
         nn.init.xavier_uniform_(w)
         self.proto = nn.Parameter(w, requires_grad=True)
+        r = torch.empty((self.num_classes))
+        #nn.init.xavier_uniform_(r)
+        self.proto_r = nn.Parameter(r, requires_grad=True)
         self.optimizer = torch.optim.Adam(self.group_parameters_proto, lr=self.lr)
+        self.optimizer_r = torch.optim.Adam([self.proto_r], lr=self.lr*20)
         
     @property
     def group_parameters_proto(self,):
         r"""Include the last layer's parameters
         """
         if isinstance(self.head, torch.nn.Linear):
-            return [p for n, p in self.head.named_parameters()] + [self.proto]
+            return [p for n, p in self.head.named_parameters()] + [self.proto_r]
         else:
-            return [p for n, p in self.head.named_parameters()] + [self.proto]
+            return [p for n, p in self.head.named_parameters()] + [self.proto, self.proto_r]
 
     def on_label_words_set(self):
         self.label_words = self.add_prefix(self.label_words, self.prefix)
@@ -136,10 +139,11 @@ class ProtoVerbalizer(Verbalizer):
         self.words_ids_mask = nn.Parameter(words_ids_mask, requires_grad=False) # A 3-d mask
         self.label_words_mask = nn.Parameter(torch.clamp(words_ids_mask.sum(dim=-1), max=1), requires_grad=False)
 
-    def process_hiddens(self, hiddens: torch.Tensor, **kwargs):
+    def process_hiddens(self, hiddens: torch.Tensor, manual_logits, **kwargs):
         r"""A whole framework to process the original logits over the vocabulary, which contains four steps: 
         """
-        proto_logits = self.sim(self.head(hiddens), self.proto)
+        #proto_logits = self.sim(self.head(hiddens), self.proto)
+        proto_logits = self.sim(self.head(hiddens), self.proto, self.proto_r, manual_logits / self.num_train)
         return proto_logits
 
     def project(self,
@@ -190,7 +194,7 @@ class ProtoVerbalizer(Verbalizer):
 
             # calibrate
             if  hasattr(self, "_calibrate_logits") and self._calibrate_logits is not None:
-                label_words_probs = self.calibrate(label_words_probs=label_words_probs)
+                label_words_logits = self.calibrate(label_words_probs=label_words_logits)
 
             # convert to logits
             # label_words_logits = torch.log(label_words_probs+1e-15)
@@ -236,15 +240,18 @@ class ProtoVerbalizer(Verbalizer):
             :obj:`torch.Tensor`: The calibrated probability of label words.
         """
         shape = label_words_probs.shape
-        assert self._calibrate_logits.dim() ==  1, "self._calibrate_logits are not 1-d tensor"
-        calibrate_label_words_probs = self.normalize(self.project(self._calibrate_logits.unsqueeze(0), **kwargs))
+        #assert self._calibrate_logits.dim() ==  1, "self._calibrate_logits are not 1-d tensor"
+        #calibrate_label_words_probs = self.normalize(self.project(self._calibrate_logits.unsqueeze(0), **kwargs))
+        calibrate_label_words_probs = self._calibrate_logits
         assert calibrate_label_words_probs.shape[1:] == label_words_probs.shape[1:] \
              and calibrate_label_words_probs.shape[0]==1, "shape not match"
         label_words_probs /= (calibrate_label_words_probs+1e-15)
         # normalize # TODO Test the performance
+        '''
         norm = label_words_probs.reshape(shape[0], -1).sum(dim=-1,keepdim=True) # TODO Test the performance of detaching()
         label_words_probs = label_words_probs.reshape(shape[0], -1) / norm
         label_words_probs = label_words_probs.reshape(*shape)
+        '''
         return label_words_probs
 
     def ensemble_logits(self, manual_logits, proto_logits):
@@ -263,10 +270,10 @@ class ProtoVerbalizer(Verbalizer):
 
     def process_outputs(self, outputs: Union[torch.Tensor, torch.Tensor], batch: Union[Dict, InputFeatures], **kwargs):
         manual_logits = self.process_logits(outputs[1])
-        if self.trained is False:
+        if self.trained is False or self.multi_verb == "manual":
             return manual_logits
         
-        proto_logits = self.process_hiddens(outputs[0])
+        proto_logits = self.process_hiddens(outputs[0], manual_logits)
         if self.trained and self.multi_verb == "proto":
             return proto_logits
 
@@ -287,15 +294,20 @@ class ProtoVerbalizer(Verbalizer):
         return ret, logits
 
     @staticmethod
-    def sim(x, y):
+    def sim_old(x, y):
         norm_x = F.normalize(x, dim=-1)
         norm_y = F.normalize(y, dim=-1)
         return torch.matmul(norm_x, norm_y.transpose(1,0))
     
+    @staticmethod
+    def sim(x, y, r=0, manual=0):
+        x = torch.unsqueeze(x, -2)
+        dist = torch.norm((x - y), dim=-1) #- r #- manual
+        return -dist
+    
     def pcl_loss(self, v_ins):
         # instance-prototype loss
-
-        sim_mat = torch.exp(self.sim(v_ins, self.proto))
+        sim_mat = torch.exp(self.sim(v_ins, self.proto, self.proto_r, self.manual_logits / self.num_train))
         num = sim_mat.shape[1]
         loss = 0.
         for i in range(num):
@@ -305,7 +317,7 @@ class ProtoVerbalizer(Verbalizer):
         loss = loss / (num * self.num_classes * self.num_classes)
 
         # instance-instance loss
-        
+        '''
         loss_ins = 0.
         for i in range(v_ins.shape[0]):
             sim_instance = torch.exp(self.sim(v_ins, v_ins[i]))
@@ -314,34 +326,66 @@ class ProtoVerbalizer(Verbalizer):
             loss_ins += - torch.log(pos_ins / (pos_ins + neg_ins)).sum()
         loss_ins = loss_ins / (num * self.num_classes * num * self.num_classes)
         loss = loss + loss_ins
-        
+        '''
         return loss
 
 
-    def train_proto(self, model, dataloader, device):
+
+    def train_proto(self, model, dataloader, calibrate_dataloader, device):
         model.eval()
         embeds = [[] for _ in range(self.num_classes)]
+        manual_logits = [[] for _ in range(self.num_classes)]
+        
         with torch.no_grad():
+            
+            for i, batch in enumerate(calibrate_dataloader):
+                batch = batch.to("cuda:{}".format(device)).to_dict()
+                outputs = model.prompt_model(batch)
+                outputs = self.gather_outputs(outputs)
+                logits = self.project(model.extract_at_mask(outputs[1], batch))
+                self._calibrate_logits = logits / torch.mean(logits)
+                print(self._calibrate_logits)
+
             for i, batch in enumerate(dataloader):
                 batch = batch.to("cuda:{}".format(device)).to_dict()
                 outputs = model.prompt_model(batch)
-                hidden, _ = self.gather_outputs(outputs)
-                outputs_at_mask = model.extract_at_mask(hidden, batch)
-                for j in range(len(outputs_at_mask)):
+                outputs = self.gather_outputs(outputs)
+                hidden, logits = model.extract_at_mask(outputs[0], batch), model.extract_at_mask(outputs[1], batch)
+                logits = self.process_logits(logits)
+                for j in range(len(hidden)):
                     label = batch['label'][j]
-                    embeds[label].append(outputs_at_mask[j])
+                    embeds[label].append(hidden[j])
+                    manual_logits[label].append(logits[j])
+            
         embeds = [torch.stack(e) for e in embeds]
         embeds = torch.stack(embeds)
+        manual_logits = [torch.stack(e) for e in manual_logits]
+        self.manual_logits = torch.stack(manual_logits)
+        self.num_train = embeds.shape[1]
 
         instance_mean = embeds.mean(1)
+        #self.proto.data = self.head(instance_mean)
+        #avg = torch.unsqueeze(instance_mean, -2) - embeds
+        avg = torch.unsqueeze(self.head(instance_mean), -2) - self.head(embeds)
+        dist = torch.norm(avg, dim=-1).mean(-1)
+        self.proto_r.data = dist
+        print(self.proto_r)
+
         loss = 0.
+        
         for epoch in range(self.epochs):
             x = self.head(embeds)
+            #x = embeds
             self.optimizer.zero_grad()
+            #self.optimizer_r.zero_grad()
             loss = self.pcl_loss(x)
             loss.backward()
             self.optimizer.step()
+            #self.optimizer_r.step()
+            #self.proto.data = self.head(embeds).mean(1)
         logger.info("Total epoch: {}. ProtoVerb loss: {}".format(self.epochs, loss))
+        
+        print(self.proto_r)
         self.trained = True
 
     

@@ -17,6 +17,7 @@ from openprompt.utils.logging import config_experiment_dir, init_logger, logger
 from openprompt.config import get_config, save_config_to_yaml
 from openprompt.plms import load_plm_from_config
 from openprompt.data_utils import load_dataset
+from openprompt.data_utils.utils import InputExample
 from openprompt.utils.cuda import model_to_device
 
 
@@ -147,7 +148,13 @@ def trainer(EXP_PATH, config, Processor, train_dataset = None, valid_dataset = N
     train_dataloader = build_dataloader(train_dataset, template, plm_tokenizer, plm_wrapper_class, config, "train") if train_dataset else None
     valid_dataloader = build_dataloader(valid_dataset, template, plm_tokenizer, plm_wrapper_class, config, "dev") if valid_dataset else None
     test_dataloader = build_dataloader(test_dataset, template, plm_tokenizer, plm_wrapper_class, config, "test") if test_dataset else None
-
+    calibrate_dataloader =  PromptDataLoader(
+                            dataset = [InputExample(guid=str(0), text_a="", text_b="", label=0)], 
+                            template = template, 
+                            tokenizer = plm_tokenizer, 
+                            tokenizer_wrapper_class=plm_wrapper_class,
+                            **config.dataloader
+                        )
     if config.task == "classification":
         if config.classification.auto_t or config.classification.auto_v:
             runner = LMBFFClassificationRunner(train_dataset = train_dataset, 
@@ -162,6 +169,7 @@ def trainer(EXP_PATH, config, Processor, train_dataset = None, valid_dataset = N
                                     train_dataloader = train_dataloader,
                                     valid_dataloader = valid_dataloader,
                                     test_dataloader = test_dataloader,
+                                    calibrate_dataloader = calibrate_dataloader,
                                     id2label = Processor.id2label,
                                     config = config
             )                                   

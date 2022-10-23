@@ -48,6 +48,7 @@ class ProtoVerbClassificationRunner(BaseRunner):
                  train_dataloader: Optional[PromptDataLoader] = None,
                  valid_dataloader: Optional[PromptDataLoader] = None,
                  test_dataloader: Optional[PromptDataLoader] = None,
+                 calibrate_dataloader: Optional[PromptDataLoader] = None,
                  loss_function: Optional[Callable] = None,
                  id2label: Optional[Dict] = None,
                  ):
@@ -57,6 +58,7 @@ class ProtoVerbClassificationRunner(BaseRunner):
                          valid_dataloader = valid_dataloader,
                          test_dataloader = test_dataloader,
                         )
+        self.calibrate_dataloader = calibrate_dataloader
         self.loss_function = loss_function if loss_function else self.configure_loss_function()
         self.id2label = id2label
         self.label_path_sep = config.dataset.label_path_sep   
@@ -132,7 +134,7 @@ class ProtoVerbClassificationRunner(BaseRunner):
     def on_fit_start(self):
         """Some initialization works"""
         if self.config.train.train_verblizer != "post":
-            self.inner_model.verbalizer.train_proto(self.model, self.train_dataloader, self.config.environment.local_rank)
+            self.inner_model.verbalizer.train_proto(self.model, self.train_dataloader, self.calibrate_dataloader, self.config.environment.local_rank)
 
     def fit(self, ckpt: Optional[str] = None):
         self.set_stop_criterion()
@@ -156,9 +158,9 @@ class ProtoVerbClassificationRunner(BaseRunner):
                 logger.info("Stop training by reaching maximum num_training_steps")
                 break
             if self.config.train.train_verblizer == "alternate":
-                self.inner_model.verbalizer.train_proto(self.model, self.train_dataloader, self.config.environment.local_rank)
+                self.inner_model.verbalizer.train_proto(self.model, self.train_dataloader, self.calibrate_dataloader, self.config.environment.local_rank)
         
         if self.config.train.train_verblizer == "post":
-            self.inner_model.verbalizer.train_proto(self.model, self.train_dataloader, self.config.environment.local_rank)
+            self.inner_model.verbalizer.train_proto(self.model, self.train_dataloader, self.calibrate_dataloader, self.config.environment.local_rank)
 
         return self.best_score

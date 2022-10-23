@@ -1,6 +1,6 @@
 dataset:
-  name: agnews
-  path: datasets/TextClassification/agnews
+  name: sst-2
+  path: datasets/TextClassification/SST-2
 
 plm:
   model_name: roberta
@@ -31,15 +31,15 @@ verbalizer: proto_verbalizer
 
 manual_template:
   choice: 3
-  file_path: scripts/TextClassification/agnews/manual_template.txt
+  file_path: scripts/TextClassification/imdb/manual_template.txt
 
 proto_verbalizer:
   parent_config: verbalizer
   choice: 0
-  file_path: scripts/TextClassification/agnews/manual_verbalizer.txt
+  file_path: scripts/TextClassification/imdb/manual_verbalizer.txt
   lr: 0.01
-  mid_dim: 128
-  epochs: 30
+  mid_dim: 64
+  epochs: 50
   multi_verb: proto
 
   
@@ -62,7 +62,7 @@ sampling_from_train:
   also_sample_dev: True
   num_examples_per_label_dev: 1
   seed:
-    - 4
+    - 2
 
 reproduce:  # seed for reproduction 
   seed: 123  # a seed for all random part
